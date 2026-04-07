@@ -1,6 +1,6 @@
 use std::{
     error::Error,
-    io::Read,
+    io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     thread,
 };
@@ -40,6 +40,7 @@ fn handle_connection(mut reader: TcpStream, peer: SocketAddr) {
             reader.peer_addr().unwrap(),
             message
         );
+        reader.write_all(b"Message received").unwrap();
     }
 
     println!("{} was disconnected!", peer);
