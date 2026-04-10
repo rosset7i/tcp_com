@@ -26,7 +26,7 @@ fn reading_loop(mut reader: TcpStream) {
     loop {
         let bytes_read = reader.read(&mut buf).unwrap(); // TODO: Remove this unwrap()
         let message = String::from_utf8_lossy(&buf[..bytes_read]);
-        println!("Read {} bytes from server: {}", bytes_read, message);
+        println!("[{}b]: {}", bytes_read, message);
     }
 }
 
