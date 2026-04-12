@@ -7,10 +7,10 @@ use std::{
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind("127.0.0.1:8080")?;
+    let listener = TcpListener::bind("0.0.0.0:8080")?;
     println!("Server listening on: {}", listener.local_addr()?);
 
-    let clients: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
+    let clients: Arc<Mutex<Vec<(TcpStream, SocketAddr)>>> = Arc::new(Mutex::new(Vec::new()));
 
     for stream in listener.incoming() {
         let stream = stream?;
@@ -18,8 +18,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Accepted connection from: {}", peer);
 
         {
-            let mut lock = clients.lock().unwrap();
-            lock.push(stream.try_clone()?);
+            let mut lock = clients.lock().unwrap_or_else(|e| e.into_inner());
+            lock.push((stream.try_clone()?, stream.peer_addr()?));
         }
 
         let reader = stream;
@@ -30,7 +30,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn handle_connection(mut reader: TcpStream, clients: Arc<Mutex<Vec<TcpStream>>>, peer: SocketAddr) {
+fn handle_connection(
+    mut reader: TcpStream,
+    clients: Arc<Mutex<Vec<(TcpStream, SocketAddr)>>>,
+    peer: SocketAddr,
+) {
     let mut buf = [0u8; 1024];
 
     loop {
@@ -42,18 +46,17 @@ fn handle_connection(mut reader: TcpStream, clients: Arc<Mutex<Vec<TcpStream>>>,
             }
         };
 
-        let message = String::from_utf8_lossy(&buf[..bytes_read]);
-        println!("[{}b] {}: {}", bytes_read, peer, message);
+        println!("Received {} bytes from {}", bytes_read, peer);
 
-        let mut lock = clients.lock().unwrap();
+        let mut lock = clients.lock().unwrap_or_else(|e| e.into_inner());
 
-        lock.retain(|mut stream| {
-            if stream.peer_addr().unwrap() == peer {
+        lock.retain_mut(|(stream, addr)| {
+            if *addr == peer {
                 return true;
             }
 
-            if let Err(e) = stream.write_all(message.as_bytes()) {
-                eprintln!("Failed to write to {}: {}", stream.peer_addr().unwrap(), e);
+            if let Err(e) = stream.write_all(&buf[..bytes_read]) {
+                eprintln!("Failed to write to {}: {}", addr, e);
                 return false;
             }
             true
