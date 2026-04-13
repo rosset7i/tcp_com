@@ -1,58 +1,62 @@
 use crate::connection::Connection;
-use std::{
-    env::args,
-    error::Error,
-    io::{Read, Write, stdin},
-    net::TcpStream,
-    thread,
+use std::{env::args, error::Error};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt, stdin},
+    net::{
+        TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
 };
 
 mod connection;
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Box<dyn Error>> {
     let connection = Connection::parse(args())?;
 
-    let stream = TcpStream::connect(connection.get_host()).map_err(|e| {
-        eprintln!("Could not connect to host {}: {}", connection.get_host(), e);
-        e
-    })?;
+    let stream = TcpStream::connect(connection.get_host())
+        .await
+        .map_err(|e| {
+            eprintln!("Could not connect to host {}: {}", connection.get_host(), e);
+            e
+        })?;
 
     println!("Successfully connected to: {}", stream.peer_addr()?);
 
-    let (reader, writer) = (stream.try_clone()?, stream);
+    let (reader, writer) = stream.into_split();
 
-    let reader_handle = thread::spawn(move || reading_loop(reader));
-    let writing_handle = thread::spawn(move || writing_loop(writer, connection));
+    let reader_handle = tokio::spawn(async move { reading_loop(reader).await });
+    let writing_handle = tokio::spawn(async move { writing_loop(writer, connection).await });
 
     reader_handle
-        .join()
+        .await
         .map_err(|err| format!("Reader thread panicked: {:?}", err))?;
     writing_handle
-        .join()
+        .await
         .map_err(|err| format!("Writer thread panicked: {:?}", err))?;
 
     Ok(())
 }
 
-fn reading_loop(mut reader: TcpStream) {
+async fn reading_loop(mut reader: OwnedReadHalf) {
     let mut buf = [0u8; 1024];
 
     loop {
-        if let Ok(bytes) = reader.read(&mut buf) {
+        if let Ok(bytes) = reader.read(&mut buf).await {
             let message = String::from_utf8_lossy(&buf[..bytes]);
             println!("[{}b]: {}", bytes, message);
         };
     }
 }
 
-fn writing_loop(mut writer: TcpStream, _connection: Connection) {
+async fn writing_loop(mut writer: OwnedWriteHalf, _connection: Connection) {
     let mut buf = [0u8; 1024];
 
     loop {
-        match stdin().read(&mut buf) {
+        match stdin().read(&mut buf).await {
             Ok(bytes) if bytes <= 2 => (),
             Ok(bytes) => {
-                if let Err(e) = writer.write_all(buf[..bytes].trim_ascii_end()) {
+                if let Err(e) = writer.write_all(buf[..bytes].trim_ascii_end()).await {
                     eprintln!("Could not write to server: {}", e);
                 }
             }
