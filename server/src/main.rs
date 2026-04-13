@@ -1,44 +1,45 @@
-use std::{
-    error::Error,
-    io::{Read, Write},
-    net::{SocketAddr, TcpListener, TcpStream},
-    sync::{Arc, Mutex},
-    thread,
+use std::{error::Error, net::SocketAddr, sync::Arc};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{
+        TcpListener,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
+    sync::Mutex,
 };
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind("0.0.0.0:8080")?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let listener = TcpListener::bind("0.0.0.0:8080").await?;
     println!("Server listening on: {}", listener.local_addr()?);
 
-    let clients: Arc<Mutex<Vec<(TcpStream, SocketAddr)>>> = Arc::new(Mutex::new(Vec::new()));
+    let clients: Arc<Mutex<Vec<(OwnedWriteHalf, SocketAddr)>>> = Arc::new(Mutex::new(Vec::new()));
 
-    for stream in listener.incoming() {
-        let stream = stream?;
-        let peer = stream.peer_addr()?;
-        println!("Accepted connection from: {}", peer);
+    loop {
+        let (stream, addr) = listener.accept().await?;
+        println!("Accepted connection from: {}", addr);
 
+        let (reader, writer) = stream.into_split();
         {
-            let mut lock = clients.lock().unwrap_or_else(|e| e.into_inner());
-            lock.push((stream.try_clone()?, stream.peer_addr()?));
+            let mut lock = clients.lock().await;
+            lock.push((writer, addr));
         }
 
-        let reader = stream;
-
         let clients_for_thread = Arc::clone(&clients);
-        thread::spawn(move || handle_connection(reader, clients_for_thread, peer));
+
+        tokio::spawn(async move { handle_connection(reader, clients_for_thread, addr).await });
     }
-    Ok(())
 }
 
-fn handle_connection(
-    mut reader: TcpStream,
-    clients: Arc<Mutex<Vec<(TcpStream, SocketAddr)>>>,
-    peer: SocketAddr,
+async fn handle_connection(
+    mut reader: OwnedReadHalf,
+    clients: Arc<Mutex<Vec<(OwnedWriteHalf, SocketAddr)>>>,
+    current_client_addr: SocketAddr,
 ) {
     let mut buf = [0u8; 1024];
 
     loop {
-        let bytes_read = match reader.read(&mut buf) {
+        let bytes_read = match reader.read(&mut buf).await {
             Ok(val) => val,
             Err(e) => {
                 eprintln!("Error while reading bytes: {}", e);
@@ -46,22 +47,22 @@ fn handle_connection(
             }
         };
 
-        println!("Received {} bytes from {}", bytes_read, peer);
+        println!("Received {} bytes from {}", bytes_read, current_client_addr);
 
-        let mut lock = clients.lock().unwrap_or_else(|e| e.into_inner());
+        let mut lock = clients.lock().await;
+        let mut i = 0;
+        while i < lock.len() {
+            let (writer, addr) = &mut lock[i];
 
-        lock.retain_mut(|(stream, addr)| {
-            if *addr == peer {
-                return true;
+            if *addr != current_client_addr && writer.write_all(&buf[..bytes_read]).await.is_err() {
+                eprintln!("Failed to write to {}", addr);
+                lock.remove(i);
+                continue;
             }
 
-            if let Err(e) = stream.write_all(&buf[..bytes_read]) {
-                eprintln!("Failed to write to {}: {}", addr, e);
-                return false;
-            }
-            true
-        });
+            i += 1;
+        }
     }
 
-    println!("{} was disconnected!", peer);
+    println!("{} was disconnected!", current_client_addr);
 }
