@@ -7,11 +7,11 @@ use tokio::{
     },
     sync::{
         Mutex,
-        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+        mpsc::{Receiver, Sender, channel},
     },
 };
 
-type ConnectedUser = (UnboundedSender<Vec<u8>>, SocketAddr);
+type ConnectedUser = (Sender<Vec<u8>>, SocketAddr);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let (stream, addr) = listener.accept().await?;
         println!("Accepted connection from: {}", addr);
 
-        let (sender, receiver) = unbounded_channel::<Vec<u8>>();
+        let (sender, receiver) = channel::<Vec<u8>>(100);
         let (reader, writer) = stream.into_split();
         {
             let mut lock = clients.lock().await;
@@ -56,21 +56,19 @@ async fn handle_connection(
 
         println!("Received {} bytes from {}", bytes_read, current_client_addr);
 
-        let mut lock = clients.lock().await;
+        let lock = clients.lock().await;
 
-        lock.retain(|(sender, addr)| {
+        for (sender, addr) in lock.iter() {
             if *addr != current_client_addr {
-                return sender.send(buf[..bytes_read].to_vec()).is_ok();
+                let _ = sender.send(buf[..bytes_read].to_vec()).await;
             };
-
-            true
-        })
+        }
     }
 
     println!("{} was disconnected!", current_client_addr);
 }
 
-async fn handle_broadcast(mut receiver: UnboundedReceiver<Vec<u8>>, mut writer: OwnedWriteHalf) {
+async fn handle_broadcast(mut receiver: Receiver<Vec<u8>>, mut writer: OwnedWriteHalf) {
     while let Some(bytes) = receiver.recv().await {
         if writer.write_all(&bytes).await.is_err() {
             let _ = writer.shutdown().await;
