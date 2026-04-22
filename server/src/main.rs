@@ -47,6 +47,7 @@ async fn handle_connection(
 
     loop {
         let bytes_read = match reader.read(&mut buf).await {
+            Ok(0) => break,
             Ok(val) => val,
             Err(e) => {
                 eprintln!("Error while reading bytes: {}", e);
@@ -56,11 +57,18 @@ async fn handle_connection(
 
         println!("Received {} bytes from {}", bytes_read, current_client_addr);
 
-        let lock = clients.lock().await;
+        let message = format!(
+            "{}: {}",
+            current_client_addr,
+            String::from_utf8_lossy(&buf[..bytes_read])
+        )
+        .as_bytes()
+        .to_vec();
 
+        let lock = clients.lock().await;
         for (sender, addr) in lock.iter() {
             if *addr != current_client_addr {
-                let _ = sender.send(buf[..bytes_read].to_vec()).await;
+                let _ = sender.send(message.clone()).await;
             };
         }
     }

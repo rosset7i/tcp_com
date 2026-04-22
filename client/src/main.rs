@@ -42,9 +42,16 @@ async fn reading_loop(mut reader: OwnedReadHalf) {
     let mut buf = [0u8; 1024];
 
     loop {
-        if let Ok(bytes) = reader.read(&mut buf).await {
-            let message = String::from_utf8_lossy(&buf[..bytes]);
-            println!("[{}b]: {}", bytes, message);
+        match reader.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(bytes) => {
+                let message = String::from_utf8_lossy(&buf[..bytes]);
+                println!("[{}b]: {}", bytes, message);
+            }
+            Err(e) => {
+                eprintln!("Error reading from server: {}", e);
+                break;
+            }
         };
     }
 }
@@ -58,6 +65,7 @@ async fn writing_loop(mut writer: OwnedWriteHalf, _connection: Connection) {
             Ok(bytes) => {
                 if let Err(e) = writer.write_all(buf[..bytes].trim_ascii_end()).await {
                     eprintln!("Could not write to server: {}", e);
+                    break;
                 }
             }
             Err(e) => eprintln!("Could not read buffer: {}", e),
