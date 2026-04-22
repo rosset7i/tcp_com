@@ -1,4 +1,5 @@
 use crate::connection::Connection;
+use message_core::message::Message;
 use std::{env::args, error::Error};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, stdin},
@@ -63,7 +64,9 @@ async fn writing_loop(mut writer: OwnedWriteHalf, _connection: Connection) {
         match stdin().read(&mut buf).await {
             Ok(bytes) if bytes <= 2 => (),
             Ok(bytes) => {
-                if let Err(e) = writer.write_all(buf[..bytes].trim_ascii_end()).await {
+                let string_msg = String::from_utf8_lossy(buf[..bytes].trim_ascii_end()).to_string();
+                let message = Message::Text(string_msg);
+                if let Err(e) = writer.write_all(&message.serialized()).await {
                     eprintln!("Could not write to server: {}", e);
                     break;
                 }

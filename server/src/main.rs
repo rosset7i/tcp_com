@@ -1,3 +1,4 @@
+use message_core::message::Message;
 use std::{error::Error, net::SocketAddr, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -56,6 +57,9 @@ async fn handle_connection(
         };
 
         println!("Received {} bytes from {}", bytes_read, current_client_addr);
+
+        let teste = Message::deserialized(buf[..bytes_read].to_vec());
+        println!("{:?}", teste);
 
         let message = format!(
             "{}: {}",
