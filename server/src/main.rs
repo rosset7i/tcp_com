@@ -58,22 +58,18 @@ async fn handle_connection(
 
         println!("Received {} bytes from {}", bytes_read, current_client_addr);
 
-        let teste = Message::deserialized(buf[..bytes_read].to_vec());
-        println!("{:?}", teste);
+        match Message::deserialized(&buf[..bytes_read]) {
+            Message::Text(text) => {
+                let message = format!("{}: {}", current_client_addr, text).into_bytes();
 
-        let message = format!(
-            "{}: {}",
-            current_client_addr,
-            String::from_utf8_lossy(&buf[..bytes_read])
-        )
-        .as_bytes()
-        .to_vec();
-
-        let lock = clients.lock().await;
-        for (sender, addr) in lock.iter() {
-            if *addr != current_client_addr {
-                let _ = sender.send(message.clone()).await;
-            };
+                let lock = clients.lock().await;
+                for (sender, addr) in lock.iter() {
+                    if *addr != current_client_addr {
+                        let _ = sender.send(message.clone()).await;
+                    };
+                }
+            }
+            Message::JoinRequest(_) => {}
         }
     }
 
