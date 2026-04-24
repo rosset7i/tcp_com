@@ -30,6 +30,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 name = "client"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "message_core",
  "tokio",
 ]
@@ -63,6 +64,7 @@ dependencies = [
 name = "message_core"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "rmp-serde",
  "serde",
 ]
@@ -202,6 +204,7 @@ dependencies = [
 name = "server"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "message_core",
  "tokio",
 ]

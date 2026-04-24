@@ -1,4 +1,6 @@
 [workspace]
 resolver = "3"
-
 members = ["client", "message_core","server"]
+
+[workspace.dependencies]
+bytes = { version = "1.11.1" }

@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1.51.1", features = ["full"] }
+bytes = { workspace = true }
 message_core = { path = "../message_core" }

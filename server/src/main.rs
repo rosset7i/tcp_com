@@ -1,3 +1,4 @@
+use bytes::{Bytes, BytesMut};
 use message_core::message::Message;
 use std::{error::Error, net::SocketAddr, sync::Arc};
 use tokio::{
@@ -12,7 +13,7 @@ use tokio::{
     },
 };
 
-type ConnectedUser = (Sender<Vec<u8>>, SocketAddr);
+type ConnectedUser = (Sender<Bytes>, SocketAddr);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -25,7 +26,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let (stream, addr) = listener.accept().await?;
         println!("Accepted connection from: {}", addr);
 
-        let (sender, receiver) = channel::<Vec<u8>>(100);
+        let (sender, receiver) = channel::<Bytes>(100);
         let (reader, writer) = stream.into_split();
         {
             let mut lock = clients.lock().await;
@@ -44,10 +45,10 @@ async fn handle_connection(
     clients: Arc<Mutex<Vec<ConnectedUser>>>,
     current_client_addr: SocketAddr,
 ) {
-    let mut buf = [0u8; 1024];
+    let mut buf = BytesMut::with_capacity(1024);
 
     loop {
-        let bytes_read = match reader.read(&mut buf).await {
+        let bytes_read = match reader.read_buf(&mut buf).await {
             Ok(0) => break,
             Ok(val) => val,
             Err(e) => {
@@ -58,9 +59,15 @@ async fn handle_connection(
 
         println!("Received {} bytes from {}", bytes_read, current_client_addr);
 
-        match Message::deserialized(&buf[..bytes_read]) {
+        let Ok(message) = Message::deserialized(&buf) else {
+            eprintln!("Could not parse message, exiting...");
+            break;
+        };
+        buf.clear();
+
+        match message {
             Message::Text(text) => {
-                let message = format!("{}: {}", current_client_addr, text).into_bytes();
+                let message = Bytes::from(format!("{}: {}", current_client_addr, text));
 
                 let lock = clients.lock().await;
                 for (sender, addr) in lock.iter() {
@@ -76,7 +83,7 @@ async fn handle_connection(
     println!("{} was disconnected!", current_client_addr);
 }
 
-async fn handle_broadcast(mut receiver: Receiver<Vec<u8>>, mut writer: OwnedWriteHalf) {
+async fn handle_broadcast(mut receiver: Receiver<Bytes>, mut writer: OwnedWriteHalf) {
     while let Some(bytes) = receiver.recv().await {
         if writer.write_all(&bytes).await.is_err() {
             let _ = writer.shutdown().await;

@@ -1,4 +1,5 @@
 use crate::connection::Connection;
+use bytes::BytesMut;
 use message_core::message::Message;
 use std::{env::args, error::Error};
 use tokio::{
@@ -40,14 +41,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn reading_loop(mut reader: OwnedReadHalf) {
-    let mut buf = [0u8; 1024];
+    let mut buf = BytesMut::with_capacity(1024);
 
     loop {
-        match reader.read(&mut buf).await {
+        match reader.read_buf(&mut buf).await {
             Ok(0) => break,
-            Ok(bytes) => {
-                let message = String::from_utf8_lossy(&buf[..bytes]);
-                println!("[{}b]: {}", bytes, message);
+            Ok(_) => {
+                println!("{}", String::from_utf8_lossy(&buf));
+                buf.clear();
             }
             Err(e) => {
                 eprintln!("Error reading from server: {}", e);
@@ -58,15 +59,17 @@ async fn reading_loop(mut reader: OwnedReadHalf) {
 }
 
 async fn writing_loop(mut writer: OwnedWriteHalf, _connection: Connection) {
-    let mut buf = [0u8; 1024];
+    let mut buf = BytesMut::with_capacity(1024);
 
     loop {
-        match stdin().read(&mut buf).await {
+        match stdin().read_buf(&mut buf).await {
             Ok(bytes) if bytes <= 2 => (),
-            Ok(bytes) => {
-                let string_msg = String::from_utf8_lossy(buf[..bytes].trim_ascii_end()).to_string();
+            Ok(_) => {
+                let string_msg = String::from_utf8_lossy(buf.trim_ascii_end()).to_string();
+                buf.clear();
+
                 let message = Message::Text(string_msg);
-                if let Err(e) = writer.write_all(&message.serialized()).await {
+                if let Err(e) = writer.write_all(&message.serialized().unwrap()).await {
                     eprintln!("Could not write to server: {}", e);
                     break;
                 }
