@@ -1,6 +1,6 @@
 use crate::connection::Connection;
 use bytes::BytesMut;
-use message_core::message::Message;
+use message_core::message::{Packet, Request};
 use std::{env::args, error::Error};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, stdin},
@@ -68,7 +68,7 @@ async fn writing_loop(mut writer: OwnedWriteHalf, _connection: Connection) {
                 let string_msg = String::from_utf8_lossy(buf.trim_ascii_end()).to_string();
                 buf.clear();
 
-                let message = Message::Text(string_msg);
+                let message = Request::Message(string_msg);
                 if let Err(e) = writer.write_all(&message.serialized().unwrap()).await {
                     eprintln!("Could not write to server: {}", e);
                     break;

@@ -1,5 +1,9 @@
 use bytes::{Bytes, BytesMut};
-use message_core::message::Message;
+use message_core::message::{Packet, Request};
+use rsa::{
+    RsaPrivateKey, RsaPublicKey,
+    rand_core::{OsRng, RngCore},
+};
 use std::{error::Error, net::SocketAddr, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -17,6 +21,9 @@ type ConnectedUser = (Sender<Bytes>, SocketAddr);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let private_key = RsaPrivateKey::new(&mut OsRng, 1024)?;
+    let _ = RsaPublicKey::from(&private_key);
+
     let listener = TcpListener::bind("0.0.0.0:8080").await?;
     println!("Server listening on: {}", listener.local_addr()?);
 
@@ -59,14 +66,14 @@ async fn handle_connection(
 
         println!("Received {} bytes from {}", bytes_read, current_client_addr);
 
-        let Ok(message) = Message::deserialized(&buf) else {
+        let Ok(message) = Request::deserialized(&buf) else {
             eprintln!("Could not parse message, exiting...");
             break;
         };
         buf.clear();
 
         match message {
-            Message::Text(text) => {
+            Request::Message(text) => {
                 let message = Bytes::from(format!("{}: {}", current_client_addr, text));
 
                 let lock = clients.lock().await;
@@ -76,7 +83,16 @@ async fn handle_connection(
                     };
                 }
             }
-            Message::JoinRequest(_) => {}
+            Request::Encryption => {
+                let mut token = [0u8; 32];
+                OsRng.fill_bytes(&mut token);
+                let lock = clients.lock().await;
+                let (_, _) = lock
+                    .iter()
+                    .find(|(_, addr)| *addr == current_client_addr)
+                    .unwrap();
+            }
+            Request::Join(_) => {}
         }
     }
 
