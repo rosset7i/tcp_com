@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1.51.1", features = ["full"] }
-rsa = { version = "0.9.10" }
+rand = { version = "0.10.1" }
+rand_chacha = { version = "0.10.0" }
+rsa = { workspace = true }
 bytes = { workspace = true }
 message_core = { path = "../message_core" }

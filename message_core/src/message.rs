@@ -12,6 +12,7 @@ pub enum Request {
     Message(String),
     Join(String),
     Encryption,
+    EncryptionConfirm(Vec<u8>, Vec<u8>),
 }
 
 impl Packet<Request> for Request {
@@ -24,11 +25,11 @@ impl Packet<Request> for Request {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Response {
     Message(String),
     Join(String),
-    Encryption,
+    Encryption(Vec<u8>, Vec<u8>),
 }
 
 impl Packet<Response> for Response {

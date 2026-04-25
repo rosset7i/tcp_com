@@ -1,6 +1,13 @@
 use crate::connection::Connection;
 use bytes::BytesMut;
-use message_core::message::{Packet, Request};
+use message_core::message::{Packet, Request, Response};
+use rand::SeedableRng;
+use rand_chacha::ChaCha20Rng;
+use rsa::{
+    Pkcs1v15Encrypt, RsaPublicKey,
+    pkcs8::DecodePublicKey,
+    rand_core::{OsRng, RngCore},
+};
 use std::{env::args, error::Error};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, stdin},
@@ -25,7 +32,43 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Successfully connected to: {}", stream.peer_addr()?);
 
-    let (reader, writer) = stream.into_split();
+    let (mut reader, mut writer) = stream.into_split();
+
+    let public_key: RsaPublicKey;
+    writer
+        .write_all(&Request::Encryption.serialized().unwrap())
+        .await
+        .unwrap();
+
+    let mut buf = BytesMut::with_capacity(1024);
+    if let Ok(_) = reader.read_buf(&mut buf).await
+        && let Response::Encryption(server_pub_key, token) = Response::deserialized(&buf).unwrap()
+    {
+        public_key = RsaPublicKey::from_public_key_der(&server_pub_key).unwrap();
+        let mut secret = [0u8; 32];
+        OsRng.fill_bytes(&mut secret);
+        let enc_secret = public_key
+            .encrypt(&mut OsRng, Pkcs1v15Encrypt, &secret[..])
+            .expect("failed to encrypt");
+        let enc_token = public_key
+            .encrypt(&mut OsRng, Pkcs1v15Encrypt, &token[..])
+            .expect("failed to encrypt");
+
+        writer
+            .write_all(
+                &Request::EncryptionConfirm(enc_secret, enc_token)
+                    .serialized()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let secret = Some(secret.to_vec());
+        let mut seed = [0u8; 32];
+        seed.copy_from_slice(&secret.as_ref().unwrap()[..]);
+        let _nonce_generator_write = Some(ChaCha20Rng::from_seed(seed));
+        let _nonce_generator_read = Some(ChaCha20Rng::from_seed(seed));
+    };
 
     let reader_handle = tokio::spawn(async move { reading_loop(reader).await });
     let writing_handle = tokio::spawn(async move { writing_loop(writer, connection).await });
@@ -47,7 +90,14 @@ async fn reading_loop(mut reader: OwnedReadHalf) {
         match reader.read_buf(&mut buf).await {
             Ok(0) => break,
             Ok(_) => {
-                println!("{}", String::from_utf8_lossy(&buf));
+                let response = Response::deserialized(&buf).unwrap();
+                match response {
+                    Response::Message(text) => {
+                        println!("{text}");
+                    }
+                    Response::Join(_) => todo!(),
+                    Response::Encryption(_, _) => todo!(),
+                }
                 buf.clear();
             }
             Err(e) => {
@@ -60,9 +110,9 @@ async fn reading_loop(mut reader: OwnedReadHalf) {
 
 async fn writing_loop(mut writer: OwnedWriteHalf, _connection: Connection) {
     let mut buf = BytesMut::with_capacity(1024);
-
+    let mut stdin = stdin();
     loop {
-        match stdin().read_buf(&mut buf).await {
+        match stdin.read_buf(&mut buf).await {
             Ok(bytes) if bytes <= 2 => (),
             Ok(_) => {
                 let string_msg = String::from_utf8_lossy(buf.trim_ascii_end()).to_string();

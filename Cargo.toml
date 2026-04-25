@@ -4,3 +4,4 @@ members = ["client", "message_core","server"]
 
 [workspace.dependencies]
 bytes = { version = "1.11.1" }
+rsa = { version = "0.9.10" }
