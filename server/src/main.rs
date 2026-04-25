@@ -1,5 +1,5 @@
 use bytes::{Bytes, BytesMut};
-use message_core::message::Message;
+use message_core::message::{Packet, Request};
 use std::{error::Error, net::SocketAddr, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -59,14 +59,14 @@ async fn handle_connection(
 
         println!("Received {} bytes from {}", bytes_read, current_client_addr);
 
-        let Ok(message) = Message::deserialized(&buf) else {
+        let Ok(message) = Request::deserialized(&buf) else {
             eprintln!("Could not parse message, exiting...");
             break;
         };
         buf.clear();
 
         match message {
-            Message::Text(text) => {
+            Request::Message(text) => {
                 let message = Bytes::from(format!("{}: {}", current_client_addr, text));
 
                 let lock = clients.lock().await;
@@ -76,7 +76,7 @@ async fn handle_connection(
                     };
                 }
             }
-            Message::JoinRequest(_) => {}
+            Request::Join(_) => {}
         }
     }
 

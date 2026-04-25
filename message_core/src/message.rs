@@ -2,18 +2,39 @@ use bytes::Bytes;
 use rmp_serde::{from_slice, to_vec};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Message {
-    Text(String),
-    JoinRequest(String),
+pub trait Packet<T> {
+    fn serialized(&self) -> Result<Bytes, rmp_serde::encode::Error>;
+    fn deserialized(buf: &[u8]) -> Result<T, rmp_serde::decode::Error>;
 }
 
-impl Message {
-    pub fn serialized(&self) -> Result<Bytes, rmp_serde::encode::Error> {
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Request {
+    Message(String),
+    Join(String),
+}
+
+impl Packet<Request> for Request {
+    fn serialized(&self) -> Result<Bytes, rmp_serde::encode::Error> {
         Ok(Bytes::from(to_vec(self)?))
     }
 
-    pub fn deserialized(buf: &[u8]) -> Result<Self, rmp_serde::decode::Error> {
+    fn deserialized(buf: &[u8]) -> Result<Self, rmp_serde::decode::Error> {
+        from_slice(buf)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Response {
+    Message(String),
+    Join(String),
+}
+
+impl Packet<Response> for Response {
+    fn serialized(&self) -> Result<Bytes, rmp_serde::encode::Error> {
+        Ok(Bytes::from(to_vec(self)?))
+    }
+
+    fn deserialized(buf: &[u8]) -> Result<Self, rmp_serde::decode::Error> {
         from_slice(buf)
     }
 }
