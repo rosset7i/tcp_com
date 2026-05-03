@@ -26,17 +26,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let (stream, addr) = listener.accept().await?;
         println!("Accepted connection from: {}", addr);
 
-        let (sender, receiver) = channel::<Bytes>(100);
+        let (tx, rx) = channel::<Bytes>(100);
         let (reader, writer) = stream.into_split();
         {
             let mut lock = clients.lock().await;
-            lock.push((sender, addr));
+            lock.push((tx, addr));
         }
 
         let clients_for_thread = Arc::clone(&clients);
 
         tokio::spawn(async move { handle_connection(reader, clients_for_thread, addr).await });
-        tokio::spawn(async move { handle_broadcast(receiver, writer).await });
+        tokio::spawn(async move { handle_broadcast(rx, writer).await });
     }
 }
 
@@ -83,11 +83,11 @@ async fn handle_connection(
     println!("{} was disconnected!", current_client_addr);
 }
 
-async fn handle_broadcast(mut receiver: Receiver<Bytes>, mut writer: OwnedWriteHalf) {
-    while let Some(bytes) = receiver.recv().await {
+async fn handle_broadcast(mut rx: Receiver<Bytes>, mut writer: OwnedWriteHalf) {
+    while let Some(bytes) = rx.recv().await {
         if writer.write_all(&bytes).await.is_err() {
             let _ = writer.shutdown().await;
-            receiver.close();
+            rx.close();
         }
     }
 }
