@@ -4,3 +4,5 @@ members = ["client", "message_core","server"]
 
 [workspace.dependencies]
 bytes = { version = "1.11.1" }
+tokio = { version = "1.51.1", features = ["full"] }
+message_core = { path = "message_core" }

@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tokio = { version = "1.51.1", features = ["full"] }
-bytes = { workspace = true }
-message_core = { path = "../message_core" }
+tokio.workspace = true
+bytes.workspace = true
+message_core.workspace = true
