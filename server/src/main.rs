@@ -1,48 +1,41 @@
-use bytes::{Bytes, BytesMut};
+use crate::channel::{ChannelMessage, handle_channel};
+use bytes::BytesMut;
 use message_core::message::{Packet, Request};
-use std::{error::Error, net::SocketAddr, sync::Arc};
+use std::{error::Error, net::SocketAddr};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{
-        TcpListener,
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-    },
-    sync::{
-        Mutex,
-        mpsc::{Receiver, Sender, channel},
-    },
+    io::AsyncReadExt,
+    net::{TcpListener, tcp::OwnedReadHalf},
+    sync::mpsc::{Sender, channel},
 };
 
-type ConnectedUser = (Sender<Bytes>, SocketAddr);
+mod channel;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("0.0.0.0:8080").await?;
     println!("Server listening on: {}", listener.local_addr()?);
 
-    let clients: Arc<Mutex<Vec<ConnectedUser>>> = Arc::new(Mutex::new(Vec::new()));
+    let (tx, rx) = channel::<ChannelMessage>(100);
+    tokio::spawn(async move { handle_channel(rx).await });
 
     loop {
+        let tx = tx.clone();
         let (stream, addr) = listener.accept().await?;
-        println!("Accepted connection from: {}", addr);
+        println!("Accepted connection from: {addr}");
 
-        let (tx, rx) = channel::<Bytes>(100);
         let (reader, writer) = stream.into_split();
-        {
-            let mut lock = clients.lock().await;
-            lock.push((tx, addr));
-        }
+        if let Err(e) = tx.send(ChannelMessage::UserJoined((writer, addr))).await {
+            eprintln!("Could not send message: {e}");
+            continue;
+        };
 
-        let clients_for_thread = Arc::clone(&clients);
-
-        tokio::spawn(async move { handle_connection(reader, clients_for_thread, addr).await });
-        tokio::spawn(async move { handle_broadcast(rx, writer).await });
+        tokio::spawn(async move { handle_connection(reader, tx, addr).await });
     }
 }
 
 async fn handle_connection(
     mut reader: OwnedReadHalf,
-    clients: Arc<Mutex<Vec<ConnectedUser>>>,
+    tx: Sender<ChannelMessage>,
     current_client_addr: SocketAddr,
 ) {
     let mut buf = BytesMut::with_capacity(1024);
@@ -52,7 +45,7 @@ async fn handle_connection(
             Ok(0) => break,
             Ok(val) => val,
             Err(e) => {
-                eprintln!("Error while reading bytes: {}", e);
+                eprintln!("Error while reading bytes: {e}");
                 break;
             }
         };
@@ -67,27 +60,17 @@ async fn handle_connection(
 
         match message {
             Request::Message(text) => {
-                let message = Bytes::from(format!("{}: {}", current_client_addr, text));
-
-                let lock = clients.lock().await;
-                for (sender, addr) in lock.iter() {
-                    if *addr != current_client_addr {
-                        let _ = sender.send(message.clone()).await;
-                    };
-                }
+                if let Err(e) = tx
+                    .send(ChannelMessage::Text((current_client_addr, text)))
+                    .await
+                {
+                    eprintln!("Could not send message: {e}");
+                    break;
+                };
             }
             Request::Join(_) => {}
         }
     }
 
     println!("{} was disconnected!", current_client_addr);
-}
-
-async fn handle_broadcast(mut rx: Receiver<Bytes>, mut writer: OwnedWriteHalf) {
-    while let Some(bytes) = rx.recv().await {
-        if writer.write_all(&bytes).await.is_err() {
-            let _ = writer.shutdown().await;
-            rx.close();
-        }
-    }
 }
